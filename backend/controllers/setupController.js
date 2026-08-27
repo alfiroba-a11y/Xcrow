@@ -22,7 +22,9 @@ exports.createAdmin = async (req, res) => {
     return res.status(400).json({ message: 'Set ADMIN_EMAIL and ADMIN_PASSWORD env vars first' });
   }
   if (ADMIN_PASSWORD.length < 8) {
-    return res.status(400).json({ message: 'ADMIN_PASSWORD must be at least 8 characters' });
+    return res.status(400).json({
+      message: `ADMIN_PASSWORD must be at least 8 characters (Render currently has it set to ${ADMIN_PASSWORD.length} characters)`,
+    });
   }
 
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
