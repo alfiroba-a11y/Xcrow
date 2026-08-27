@@ -43,6 +43,11 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/escrows', escrowRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/support', supportRoutes);
+// near the other route requires, add:
+const setupRoutes = require('./routes/setupRoutes');
+
+// near the other app.use('/api/...') lines, add:
+app.use('/api/setup', setupRoutes);
 
 // The admin API lives behind an unguessable path segment (set via env,
 // must match ADMIN_PANEL_SECRET / the frontend's VITE_ADMIN_PATH) on top of
