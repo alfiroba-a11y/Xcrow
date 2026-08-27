@@ -3,7 +3,7 @@ services:
     name: xcrow-backend
     env: node
     rootDir: backend
-    plan: starter
+    plan: free
     buildCommand: npm install
     startCommand: npm start
     envVars:
@@ -37,6 +37,8 @@ services:
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     routes:
+      # React Router uses client-side routes (e.g. /dashboard, /escrow/123) —
+      # without this, refreshing any page other than "/" would 404.
       - type: rewrite
         source: /*
         destination: /index.html
