@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-slate-50 text-navy-900 font-body antialiased;
+}
+
+h1, h2, h3, h4 {
+  @apply font-display;
+}
+
+::selection {
+  @apply bg-emerald-400/30;
+}
+
+*:focus-visible {
+  outline: 2px solid #2FA968;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-5 py-2.5 font-medium transition;
+}
+.btn-primary {
+  @apply btn bg-navy-700 text-white hover:bg-navy-800 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+.btn-accent {
+  @apply btn bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+.btn-ghost {
+  @apply btn bg-transparent text-navy-700 hover:bg-navy-700/5;
+}
+.btn-danger {
+  @apply btn bg-rose-500 text-white hover:bg-rose-600 disabled:opacity-50;
+}
+.input {
+  @apply w-full rounded-lg border border-slate-100 bg-white px-4 py-2.5 text-navy-900 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none;
+}
+.card {
+  @apply rounded-2xl border border-slate-100 bg-white shadow-sm;
+}
+.label {
+  @apply block text-sm font-medium text-slate-700 mb-1.5;
+}
+.badge {
+  @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold;
+}
