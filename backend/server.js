@@ -16,11 +16,17 @@ const escrowRoutes = require('./routes/escrowRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const supportRoutes = require('./routes/supportRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const setupRoutes = require('./routes/setupRoutes');
 
 connectDB();
 
 const app = express();
 const server = http.createServer(app);
+
+// Render (and most PaaS providers) sit behind a reverse proxy. Without this,
+// express-rate-limit can't safely read the real client IP from
+// X-Forwarded-For and throws a validation error on every request.
+app.set('trust proxy', 1);
 
 const io = new Server(server, {
   cors: { origin: process.env.CLIENT_URL, credentials: true },
@@ -43,10 +49,6 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/escrows', escrowRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/support', supportRoutes);
-// near the other route requires, add:
-const setupRoutes = require('./routes/setupRoutes');
-
-// near the other app.use('/api/...') lines, add:
 app.use('/api/setup', setupRoutes);
 
 // The admin API lives behind an unguessable path segment (set via env,
