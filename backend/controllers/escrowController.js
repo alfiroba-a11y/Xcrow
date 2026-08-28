@@ -4,7 +4,12 @@ const { generateInviteToken, generateLockCode } = require('../utils/generateCode
 
 function isParticipant(escrow, userId) {
   const uid = String(userId);
-  return String(escrow.buyer) === uid || (escrow.seller && String(escrow.seller) === uid);
+  // escrow.buyer/seller may be a plain ObjectId, or a full populated user
+  // document (when the query used .populate()) — handle both so this check
+  // works no matter which form the caller fetched.
+  const buyerId = escrow.buyer && (escrow.buyer._id || escrow.buyer);
+  const sellerId = escrow.seller && (escrow.seller._id || escrow.seller);
+  return (buyerId && String(buyerId) === uid) || (sellerId && String(sellerId) === uid);
 }
 
 async function addSystemMessage(escrowId, text) {
