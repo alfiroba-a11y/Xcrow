@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Escrow = require('../models/Escrow');
 const SupportTicket = require('../models/SupportTicket');
+const Message = require('../models/Message');
 const { addSystemMessage } = require('./escrowController');
 const paystack = require('../utils/paystack');
 
@@ -67,6 +68,54 @@ exports.replyToTicketAsAdmin = async (req, res) => {
   res.json({ ticket });
 };
 
+// Admin can cancel any escrow that hasn't been funded yet (nothing to
+// refund). Once money is actually held, use refundEscrow or forceRelease
+// instead — cancelling funded money doesn't make sense on its own.
+exports.cancelEscrow = async (req, res) => {
+  const escrow = await Escrow.findById(req.params.id);
+  if (!escrow) return res.status(404).json({ message: 'Escrow not found' });
+  if (!['awaiting_seller', 'awaiting_buyer', 'awaiting_payment'].includes(escrow.status)) {
+    return res.status(400).json({ message: 'This escrow already has funds involved — use refund or force-release instead' });
+  }
+
+  escrow.status = 'cancelled';
+  escrow.cancelledAt = new Date();
+  await escrow.save();
+  await addSystemMessage(escrow._id, 'An admin cancelled this escrow.');
+  notifyAdmins(req);
+
+  res.json({ escrow });
+};
+
+// Dispute resolution: skip the buyer's normal confirm-and-release step and
+// send funds straight to the seller. Same downstream payout-approval safety
+// net still applies afterward (approvePayout does the actual transfer).
+exports.forceRelease = async (req, res) => {
+  const escrow = await Escrow.findById(req.params.id);
+  if (!escrow) return res.status(404).json({ message: 'Escrow not found' });
+  if (!['funded', 'in_progress', 'delivered'].includes(escrow.status)) {
+    return res.status(400).json({ message: 'This escrow is not in a fundable state to release' });
+  }
+
+  escrow.status = 'completed';
+  escrow.completedAt = new Date();
+  escrow.payout.status = 'pending';
+  await escrow.save();
+  await addSystemMessage(escrow._id, 'An admin reviewed this case and released the funds to the seller for payout.');
+  notifyAdmins(req);
+
+  res.json({ escrow });
+};
+
+exports.getEscrowMessages = async (req, res) => {
+  const messages = await Message.find({ escrow: req.params.id }).sort({ createdAt: 1 }).populate('sender', 'name email');
+  res.json({ messages });
+};
+
+function notifyAdmins(req) {
+  req.app.get('io').to('admin-room').emit('admin:refresh');
+}
+
 // Manual dispute resolution: refund the buyer instead of paying the seller.
 exports.refundEscrow = async (req, res) => {
   const escrow = await Escrow.findById(req.params.id);
@@ -80,6 +129,7 @@ exports.refundEscrow = async (req, res) => {
   escrow.payout.status = 'none';
   await escrow.save();
   await addSystemMessage(escrow._id, 'An admin reviewed this case and refunded the buyer.');
+  notifyAdmins(req);
 
   res.json({ escrow });
 };
@@ -111,6 +161,7 @@ exports.approvePayout = async (req, res) => {
     escrow.payout.paidAt = new Date();
     await escrow.save();
     await addSystemMessage(escrow._id, 'Funds have been released to the seller.');
+    notifyAdmins(req);
 
     res.json({ escrow });
   } catch (err) {
@@ -136,6 +187,7 @@ exports.confirmCryptoPayment = async (req, res) => {
   escrow.usdtClaim.confirmedBy = req.user._id;
   await escrow.save();
   await addSystemMessage(escrow._id, 'An admin confirmed the USDT payment on-chain. Funds are now held in escrow.');
+  notifyAdmins(req);
 
   res.json({ escrow });
 };
