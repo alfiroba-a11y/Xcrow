@@ -1,6 +1,7 @@
 const Escrow = require('../models/Escrow');
 const Message = require('../models/Message');
 const { generateInviteToken, generateLockCode } = require('../utils/generateCode');
+const { notifyAdmins } = require('../utils/adminBus');
 
 function isParticipant(escrow, userId) {
   const uid = String(userId);
@@ -22,7 +23,12 @@ function isMainParty(escrow, userId) {
 }
 
 async function addSystemMessage(escrowId, text) {
-  return Message.create({ escrow: escrowId, isSystem: true, text });
+  const message = await Message.create({ escrow: escrowId, isSystem: true, text });
+  // Every meaningful escrow transition posts one of these, so this single
+  // hook is enough to keep the admin dashboard live without touching every
+  // controller that changes escrow state.
+  notifyAdmins('admin:refresh');
+  return message;
 }
 
 // Either the buyer or the seller can start an escrow and invite the other
