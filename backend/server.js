@@ -32,6 +32,7 @@ const io = new Server(server, {
   cors: { origin: process.env.CLIENT_URL, credentials: true },
 });
 app.set('io', io);
+require('./utils/adminBus').setIO(io);
 registerSocketHandlers(io);
 
 app.use(helmet());
