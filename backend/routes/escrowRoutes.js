@@ -12,9 +12,11 @@ router.use(protect);
 router.post('/', ctrl.createEscrow);
 router.get('/', ctrl.listMyEscrows);
 router.post('/join/:token', ctrl.joinEscrow);
+router.post('/third-party/join/:token', ctrl.joinThirdParty);
 
 router.get('/:id', ctrl.getEscrow);
 router.get('/:id/messages', chatCtrl.getMessages);
+router.post('/:id/invite-third-party', ctrl.inviteThirdParty);
 router.post('/:id/deliver', ctrl.markDelivered);
 router.post('/:id/confirm', ctrl.confirmAndRelease);
 router.post('/:id/cancel', ctrl.cancelEscrow);
