@@ -22,14 +22,14 @@ async function resolveAccountNumber(accountNumber, bankCode) {
   return data.data; // { account_number, account_name }
 }
 
-async function listBanks(currency = 'NGN') {
-  const { data } = await paystack.get('/bank', { params: { currency } });
+async function listBanks(currency = 'KES', type) {
+  const { data } = await paystack.get('/bank', { params: { currency, ...(type ? { type } : {}) } });
   return data.data;
 }
 
-async function createTransferRecipient({ name, accountNumber, bankCode, currency = 'NGN' }) {
+async function createTransferRecipient({ name, accountNumber, bankCode, currency = 'KES', type = 'nuban' }) {
   const { data } = await paystack.post('/transferrecipient', {
-    type: 'nuban',
+    type,
     name,
     account_number: accountNumber,
     bank_code: bankCode,
