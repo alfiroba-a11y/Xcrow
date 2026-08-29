@@ -40,7 +40,8 @@ exports.listEscrows = async (req, res) => {
   const escrows = await Escrow.find()
     .sort({ createdAt: -1 })
     .populate('buyer', 'name email')
-    .populate('seller', 'name email');
+    .populate('seller', 'name email')
+    .populate('thirdParties', 'name email');
   res.json({ escrows });
 };
 
@@ -118,4 +119,23 @@ exports.approvePayout = async (req, res) => {
     console.error('Payout error:', err.response?.data || err.message);
     res.status(502).json({ message: 'Transfer failed. Check the Paystack balance and try again.' });
   }
+};
+
+// Admin has manually checked the transaction hash on a block explorer and
+// confirms the USDT payment really landed — this is the only thing that
+// marks a crypto-funded escrow as "funded". Never automatic.
+exports.confirmCryptoPayment = async (req, res) => {
+  const escrow = await Escrow.findById(req.params.id);
+  if (!escrow) return res.status(404).json({ message: 'Escrow not found' });
+  if (escrow.status !== 'awaiting_payment' || !escrow.usdtClaim?.txHash) {
+    return res.status(400).json({ message: 'This escrow has no pending USDT claim to confirm' });
+  }
+
+  escrow.status = 'funded';
+  escrow.usdtClaim.confirmedAt = new Date();
+  escrow.usdtClaim.confirmedBy = req.user._id;
+  await escrow.save();
+  await addSystemMessage(escrow._id, 'An admin confirmed the USDT payment on-chain. Funds are now held in escrow.');
+
+  res.json({ escrow });
 };
