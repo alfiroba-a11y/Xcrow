@@ -8,6 +8,7 @@ const bankDetailsSchema = new mongoose.Schema(
     accountNumber: String,
     accountName: String,
     recipientCode: String, // Paystack transfer recipient code
+    method: { type: String, enum: ['bank', 'mobile_money'], default: 'bank' },
   },
   { _id: false }
 );
