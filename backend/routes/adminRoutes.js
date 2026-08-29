@@ -15,6 +15,9 @@ router.get('/users', ctrl.listUsers);
 router.patch('/users/:id/toggle-active', ctrl.toggleUserActive);
 
 router.get('/escrows', ctrl.listEscrows);
+router.get('/escrows/:id/messages', ctrl.getEscrowMessages);
+router.post('/escrows/:id/cancel', ctrl.cancelEscrow);
+router.post('/escrows/:id/force-release', ctrl.forceRelease);
 router.post('/escrows/:id/refund', ctrl.refundEscrow);
 router.post('/escrows/:id/approve-payout', ctrl.approvePayout);
 router.post('/escrows/:id/confirm-crypto', ctrl.confirmCryptoPayment);
