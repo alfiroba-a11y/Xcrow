@@ -4,8 +4,8 @@ import { getSocket } from '../../api/socket.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import StatusPill from '../../components/StatusPill.jsx';
 
-function money(kobo) {
-  return new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(kobo);
+function money(amount) {
+  return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(amount);
 }
 
 export default function AdminDashboard() {
@@ -16,6 +16,8 @@ export default function AdminDashboard() {
   const [escrows, setEscrows] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [toast, setToast] = useState('');
+  const [live, setLive] = useState(false);
+  const [selectedEscrow, setSelectedEscrow] = useState(null);
 
   const refresh = async () => {
     const [o, u, e, t] = await Promise.all([
@@ -30,6 +32,11 @@ export default function AdminDashboard() {
     setTickets(t.data.tickets);
   };
 
+  const flashLive = () => {
+    setLive(true);
+    setTimeout(() => setLive(false), 1200);
+  };
+
   useEffect(() => {
     refresh();
     const socket = getSocket();
@@ -38,18 +45,31 @@ export default function AdminDashboard() {
       setTickets((prev) => [ticket, ...prev]);
       setToast(`New support ticket: ${ticket.subject}`);
       setTimeout(() => setToast(''), 5000);
+      flashLive();
     });
     socket.on('support:ticket-updated', (updated) => {
       setTickets((prev) => prev.map((t) => (t._id === updated._id ? updated : t)));
+      flashLive();
+    });
+    socket.on('admin:refresh', () => {
+      refresh();
+      flashLive();
     });
     return () => {
       socket.off('support:new-ticket');
       socket.off('support:ticket-updated');
+      socket.off('admin:refresh');
     };
   }, []);
 
   const toggleUser = async (id) => {
     await adminApi.patch(`/users/${id}/toggle-active`);
+    refresh();
+  };
+
+  const cancelEscrow = async (id) => {
+    if (!confirm('Cancel this escrow? Only possible before any funds are involved.')) return;
+    await adminApi.post(`/escrows/${id}/cancel`);
     refresh();
   };
 
@@ -59,9 +79,21 @@ export default function AdminDashboard() {
     refresh();
   };
 
+  const forceRelease = async (id) => {
+    if (!confirm('Force-release these funds to the seller now, skipping buyer confirmation?')) return;
+    await adminApi.post(`/escrows/${id}/force-release`);
+    refresh();
+  };
+
   const approvePayout = async (id) => {
     if (!confirm('Release funds to the seller now?')) return;
     await adminApi.post(`/escrows/${id}/approve-payout`);
+    refresh();
+  };
+
+  const confirmCrypto = async (id, txHash) => {
+    if (!confirm(`Confirm you've verified this USDT transaction on-chain?\n\nTx: ${txHash}`)) return;
+    await adminApi.post(`/escrows/${id}/confirm-crypto`);
     refresh();
   };
 
@@ -72,7 +104,10 @@ export default function AdminDashboard() {
       )}
 
       <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-        <p className="font-mono text-sm text-slate-400">xcrow / control panel</p>
+        <div className="flex items-center gap-2">
+          <p className="font-mono text-sm text-slate-400">xcrow / control panel</p>
+          <span className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-400' : 'bg-white/20'}`} title="Live connection" />
+        </div>
         <button onClick={adminLogout} className="text-sm text-slate-400 hover:text-white">Sign out</button>
       </header>
 
@@ -118,18 +153,33 @@ export default function AdminDashboard() {
           <Table
             headers={['Title', 'Amount', 'Buyer', 'Seller', 'Status', 'Actions']}
             rows={escrows.map((e) => [
-              e.title,
+              <button key="t" onClick={() => setSelectedEscrow(e)} className="text-left font-medium text-white hover:underline">
+                {e.title}
+              </button>,
               money(e.amount / 100),
-              e.buyer?.email,
+              e.buyer?.email || '—',
               e.seller?.email || '—',
               <StatusPill key="p" status={e.status} />,
-              <div key="a" className="flex gap-3">
-                {['funded', 'in_progress', 'delivered', 'disputed'].includes(e.status) && (
-                  <button onClick={() => refund(e._id)} className="text-xs text-rose-400 hover:underline">Refund buyer</button>
+              <div key="a" className="flex flex-col gap-1">
+                {e.usdtClaim?.txHash && !e.usdtClaim.confirmedAt && (
+                  <button onClick={() => confirmCrypto(e._id, e.usdtClaim.txHash)} className="text-left text-xs text-emerald-400 hover:underline">
+                    Confirm USDT ({e.usdtClaim.txHash.slice(0, 10)}…)
+                  </button>
                 )}
-                {e.status === 'completed' && e.payout?.status === 'pending' && (
-                  <button onClick={() => approvePayout(e._id)} className="text-xs text-emerald-400 hover:underline">Approve payout</button>
-                )}
+                <div className="flex flex-wrap gap-3">
+                  {['awaiting_seller', 'awaiting_buyer', 'awaiting_payment'].includes(e.status) && (
+                    <button onClick={() => cancelEscrow(e._id)} className="text-xs text-slate-400 hover:underline">Cancel</button>
+                  )}
+                  {['funded', 'in_progress', 'delivered', 'disputed'].includes(e.status) && (
+                    <>
+                      <button onClick={() => refund(e._id)} className="text-xs text-rose-400 hover:underline">Refund buyer</button>
+                      <button onClick={() => forceRelease(e._id)} className="text-xs text-emerald-400 hover:underline">Force release</button>
+                    </>
+                  )}
+                  {e.status === 'completed' && e.payout?.status === 'pending' && (
+                    <button onClick={() => approvePayout(e._id)} className="text-xs text-emerald-400 hover:underline">Approve payout</button>
+                  )}
+                </div>
               </div>,
             ])}
           />
@@ -142,6 +192,84 @@ export default function AdminDashboard() {
           </div>
         )}
       </main>
+
+      {selectedEscrow && (
+        <EscrowDetailDrawer
+          escrow={escrows.find((e) => e._id === selectedEscrow._id) || selectedEscrow}
+          onClose={() => setSelectedEscrow(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EscrowDetailDrawer({ escrow, onClose }) {
+  const [messages, setMessages] = useState(null);
+
+  useEffect(() => {
+    adminApi.get(`/escrows/${escrow._id}/messages`).then(({ data }) => setMessages(data.messages)).catch(() => setMessages([]));
+  }, [escrow._id]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/50">
+      <div className="h-full w-full max-w-lg overflow-y-auto bg-navy-900 p-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="font-display text-lg font-bold">{escrow.title}</p>
+            <p className="text-xs text-slate-400 font-mono">{escrow._id}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <Field label="Amount" value={money(escrow.amount / 100)} />
+          <Field label="Status" value={<StatusPill status={escrow.status} />} />
+          <Field label="Buyer" value={escrow.buyer?.email || '—'} />
+          <Field label="Seller" value={escrow.seller?.email || '—'} />
+          <Field label="Payout status" value={escrow.payout?.status || 'none'} />
+          <Field label="Funding method" value={escrow.fundingMethod || 'paystack'} />
+          {escrow.thirdParties?.length > 0 && (
+            <Field label="Third parties" value={escrow.thirdParties.map((tp) => tp.email).join(', ')} />
+          )}
+          {escrow.usdtClaim?.txHash && (
+            <Field label="USDT tx hash" value={<span className="break-all font-mono text-xs">{escrow.usdtClaim.txHash}</span>} />
+          )}
+        </div>
+
+        {escrow.description && (
+          <div className="mt-4">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Description</p>
+            <p className="mt-1 text-sm text-slate-200">{escrow.description}</p>
+          </div>
+        )}
+
+        <div className="mt-6">
+          <p className="text-xs uppercase tracking-wide text-slate-400">Chat transcript</p>
+          <div className="mt-2 max-h-80 space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-navy-950 p-3">
+            {messages === null ? (
+              <p className="text-xs text-slate-500">Loading…</p>
+            ) : messages.length === 0 ? (
+              <p className="text-xs text-slate-500">No messages yet.</p>
+            ) : (
+              messages.map((m) => (
+                <p key={m._id} className={`text-xs ${m.isSystem ? 'text-slate-500 italic' : 'text-slate-200'}`}>
+                  {!m.isSystem && <span className="font-semibold text-emerald-400">{m.sender?.name}: </span>}
+                  {m.text}
+                </p>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, value }) {
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
+      <div className="mt-0.5 text-slate-100">{value}</div>
     </div>
   );
 }
