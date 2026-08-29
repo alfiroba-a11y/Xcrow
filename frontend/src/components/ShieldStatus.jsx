@@ -1,7 +1,8 @@
-const STEPS = ['awaiting_seller', 'awaiting_payment', 'funded', 'in_progress', 'delivered', 'completed'];
+const STEPS = ['awaiting_payment', 'funded', 'in_progress', 'delivered', 'completed'];
 
 const LABELS = {
   awaiting_seller: 'Waiting for seller',
+  awaiting_buyer: 'Waiting for buyer',
   awaiting_payment: 'Waiting for payment',
   funded: 'Funds held',
   in_progress: 'In progress',
@@ -19,12 +20,12 @@ const TERMINAL_COLORS = {
 };
 
 // Renders the escrow's progress as a shield filling from outline to full
-// color, the same two-tone (navy -> emerald) sweep as the Xcrow mark —
-// so the state of the money is legible at a glance, not just a text label.
+// color, the same two-tone (navy -> emerald) sweep as the Xcrow mark.
 export default function ShieldStatus({ status, size = 72 }) {
   const isTerminalOdd = TERMINAL_COLORS[status];
+  const isPreLink = status === 'awaiting_seller' || status === 'awaiting_buyer';
   const stepIndex = STEPS.indexOf(status);
-  const pct = isTerminalOdd ? 100 : Math.max(6, ((stepIndex + 1) / STEPS.length) * 100);
+  const pct = isTerminalOdd || isPreLink ? 6 : Math.max(6, ((stepIndex + 1) / STEPS.length) * 100);
   const fillColor = isTerminalOdd || 'url(#xcrow-shield-gradient)';
   const clipHeight = 100 - pct;
 
@@ -56,7 +57,9 @@ export default function ShieldStatus({ status, size = 72 }) {
       </svg>
       <div>
         <p className="font-display text-sm font-semibold text-navy-900">{LABELS[status] || status}</p>
-        <p className="text-xs text-slate-500">Step {isTerminalOdd ? '—' : `${stepIndex + 1} of ${STEPS.length}`}</p>
+        <p className="text-xs text-slate-500">
+          {isTerminalOdd || isPreLink ? '—' : `Step ${stepIndex + 1} of ${STEPS.length}`}
+        </p>
       </div>
     </div>
   );

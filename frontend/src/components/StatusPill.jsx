@@ -1,5 +1,6 @@
 const STYLES = {
   awaiting_seller: 'bg-slate-100 text-slate-700',
+  awaiting_buyer: 'bg-slate-100 text-slate-700',
   awaiting_payment: 'bg-amber-500/10 text-amber-500',
   funded: 'bg-navy-700/10 text-navy-700',
   in_progress: 'bg-navy-700/10 text-navy-700',
@@ -12,6 +13,7 @@ const STYLES = {
 
 const LABELS = {
   awaiting_seller: 'Awaiting seller',
+  awaiting_buyer: 'Awaiting buyer',
   awaiting_payment: 'Awaiting payment',
   funded: 'Funded',
   in_progress: 'In progress',
