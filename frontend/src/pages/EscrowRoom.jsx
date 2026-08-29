@@ -3,12 +3,14 @@ import { useParams } from 'react-router-dom';
 import Navbar from '../components/Navbar.jsx';
 import ShieldStatus from '../components/ShieldStatus.jsx';
 import StatusPill from '../components/StatusPill.jsx';
+import CopyButton from '../components/CopyButton.jsx';
+import LockCodeBadge from '../components/LockCodeBadge.jsx';
 import { api } from '../api/axios.js';
 import { getSocket } from '../api/socket.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
-function formatMoney(kobo, currency) {
-  return new Intl.NumberFormat('en-NG', { style: 'currency', currency: currency || 'NGN' }).format(kobo / 100);
+function formatMoney(cents, currency) {
+  return new Intl.NumberFormat('en-KE', { style: 'currency', currency: currency || 'KES' }).format(cents / 100);
 }
 
 export default function EscrowRoom() {
@@ -21,10 +23,16 @@ export default function EscrowRoom() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [fundTab, setFundTab] = useState('paystack');
   const bottomRef = useRef(null);
 
-  const isBuyer = escrow && String(escrow.buyer._id || escrow.buyer) === String(user.id);
+  const isBuyer = escrow && escrow.buyer && String(escrow.buyer._id || escrow.buyer) === String(user.id);
   const isSeller = escrow && escrow.seller && String(escrow.seller._id || escrow.seller) === String(user.id);
+  const isMainParty = isBuyer || isSeller;
+  const isThirdParty = escrow && !isMainParty && (escrow.thirdParties || []).some(
+    (tp) => String(tp._id || tp) === String(user.id)
+  );
 
   const loadEscrow = async () => {
     const { data } = await api.get(`/escrows/${id}`);
@@ -78,7 +86,7 @@ export default function EscrowRoom() {
     }
   };
 
-  const handleFund = async () => {
+  const handleFundPaystack = async () => {
     setError('');
     setBusy(true);
     try {
@@ -112,7 +120,12 @@ export default function EscrowRoom() {
   }
   if (!escrow) return <div><Navbar /><p className="mt-10 text-center text-sm text-slate-400">Loading…</p></div>;
 
-  const other = isBuyer ? escrow.seller : escrow.buyer;
+  const thirdParties = escrow.thirdParties || [];
+  const others = [
+    escrow.buyer && !isBuyer ? { ...escrow.buyer, tag: 'Buyer' } : null,
+    escrow.seller && !isSeller ? { ...escrow.seller, tag: 'Seller' } : null,
+    ...thirdParties.filter((tp) => String(tp._id || tp) !== String(user.id)).map((tp) => ({ ...tp, tag: 'Observer' })),
+  ].filter(Boolean);
 
   return (
     <div>
@@ -123,7 +136,9 @@ export default function EscrowRoom() {
             <div>
               <p className="font-display font-semibold text-navy-900">{escrow.title}</p>
               <p className="text-xs text-slate-500">
-                {other ? `Chatting with ${other.name}` : 'Waiting for the seller to join'}
+                {others.length
+                  ? others.map((o) => `${o.name} (${o.tag})`).join(' · ')
+                  : 'Waiting for the other side to join'}
               </p>
             </div>
             <StatusPill status={escrow.status} />
@@ -138,6 +153,9 @@ export default function EscrowRoom() {
                   <div className={`max-w-xs rounded-2xl px-4 py-2 text-sm ${
                     (m.sender?._id || m.sender) === user.id ? 'bg-navy-700 text-white' : 'bg-slate-100 text-navy-900'
                   }`}>
+                    {!((m.sender?._id || m.sender) === user.id) && m.sender?.name && (
+                      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-60">{m.sender.name}</p>
+                    )}
                     {m.text}
                   </div>
                 )}
@@ -149,12 +167,12 @@ export default function EscrowRoom() {
           <form onSubmit={sendMessage} className="flex gap-2 border-t border-slate-100 p-3">
             <input
               className="input"
-              placeholder={escrow.seller ? 'Type a message…' : 'Chat unlocks once the seller joins'}
-              disabled={!escrow.seller}
+              placeholder={escrow.buyer && escrow.seller ? 'Type a message…' : 'Chat unlocks once both sides have joined'}
+              disabled={!(escrow.buyer && escrow.seller)}
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
-            <button className="btn-accent" disabled={!escrow.seller}>Send</button>
+            <button className="btn-accent" disabled={!(escrow.buyer && escrow.seller)}>Send</button>
           </form>
         </div>
 
@@ -164,11 +182,20 @@ export default function EscrowRoom() {
             <p className="mt-4 text-2xl font-bold text-navy-900">{formatMoney(escrow.amount, escrow.currency)}</p>
             {escrow.description && <p className="mt-1 text-sm text-slate-500">{escrow.description}</p>}
 
+            <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
+              <span>ID: {escrow._id}</span>
+              <CopyButton value={escrow._id} label="Copy ID" />
+            </div>
+
             {error && <p className="mt-3 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-500">{error}</p>}
 
             <div className="mt-4 space-y-2">
               {isBuyer && escrow.status === 'awaiting_payment' && (
-                <button onClick={handleFund} disabled={busy} className="btn-accent w-full">Fund escrow with Paystack</button>
+                <FundingPanel
+                  fundTab={fundTab} setFundTab={setFundTab}
+                  onPaystack={handleFundPaystack} busy={busy}
+                  escrowId={id} escrow={escrow} onUpdated={setEscrow} setError={setError}
+                />
               )}
               {isSeller && ['funded', 'in_progress'].includes(escrow.status) && (
                 <button onClick={() => handleAction('deliver')} disabled={busy} className="btn-primary w-full">Mark as delivered</button>
@@ -176,13 +203,21 @@ export default function EscrowRoom() {
               {isBuyer && escrow.status === 'delivered' && (
                 <button onClick={() => handleAction('confirm')} disabled={busy} className="btn-accent w-full">Confirm receipt & release funds</button>
               )}
-              {isBuyer && ['awaiting_seller', 'awaiting_payment'].includes(escrow.status) && (
+              {isMainParty && ['awaiting_seller', 'awaiting_buyer', 'awaiting_payment'].includes(escrow.status) && (
                 <button onClick={() => handleAction('cancel')} disabled={busy} className="btn-ghost w-full text-rose-500">Cancel escrow</button>
               )}
             </div>
           </div>
 
           {isSeller && <BankDetailsCard />}
+
+          {isMainParty && (
+            <div className="card p-5">
+              <p className="font-display text-sm font-semibold text-navy-900">Add someone to watch</p>
+              <p className="mt-1 text-xs text-slate-500">Invite a mediator or inspector into the chat. They can't touch funds.</p>
+              <button onClick={() => setInviteOpen(true)} className="btn-ghost mt-3 w-full">Invite a third party</button>
+            </div>
+          )}
 
           <div className="card p-5">
             <p className="font-display text-sm font-semibold text-navy-900">Something wrong?</p>
@@ -193,12 +228,152 @@ export default function EscrowRoom() {
       </div>
 
       {supportOpen && <SupportModal escrowId={id} onClose={() => setSupportOpen(false)} />}
+      {inviteOpen && <InviteThirdPartyModal escrowId={id} onClose={() => setInviteOpen(false)} />}
+    </div>
+  );
+}
+
+function FundingPanel({ escrowId, escrow, onUpdated, setError, busy, onPaystack, fundTab, setFundTab }) {
+  const [usdt, setUsdt] = useState(null);
+  const [txHash, setTxHash] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (fundTab !== 'usdt' || usdt) return;
+    api.get('/payments/usdt-address').then(({ data }) => setUsdt(data)).catch(() => setUsdt(false));
+  }, [fundTab, usdt]);
+
+  const submitClaim = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      const { data } = await api.post(`/payments/${escrowId}/submit-crypto`, { txHash });
+      onUpdated(data.escrow);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not submit that reference');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (escrow.usdtClaim?.txHash && !escrow.usdtClaim.confirmedAt) {
+    return (
+      <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+        USDT reference submitted — waiting for an admin to confirm it on-chain. This can take a little while.
+      </p>
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex gap-1 rounded-lg bg-slate-100 p-1 text-xs font-medium">
+        <button type="button" onClick={() => setFundTab('paystack')}
+          className={`flex-1 rounded-md py-1.5 ${fundTab === 'paystack' ? 'bg-white shadow-sm text-navy-900' : 'text-slate-500'}`}>
+          Paystack
+        </button>
+        <button type="button" onClick={() => setFundTab('usdt')}
+          className={`flex-1 rounded-md py-1.5 ${fundTab === 'usdt' ? 'bg-white shadow-sm text-navy-900' : 'text-slate-500'}`}>
+          USDT
+        </button>
+      </div>
+
+      {fundTab === 'paystack' ? (
+        <button onClick={onPaystack} disabled={busy} className="btn-accent w-full">Fund escrow with Paystack</button>
+      ) : usdt === false ? (
+        <p className="text-xs text-slate-400">USDT payments aren't set up for this escrow.</p>
+      ) : !usdt ? (
+        <p className="text-xs text-slate-400">Loading…</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex justify-center">
+            <img
+              alt="USDT deposit address QR code"
+              className="h-36 w-36 rounded-lg border border-slate-100"
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(usdt.address)}`}
+            />
+          </div>
+          <p className="text-center text-xs text-slate-500">Send exactly this escrow's amount in USDT ({usdt.network}) to:</p>
+          <div className="flex items-center gap-2">
+            <input readOnly className="input font-mono text-xs" value={usdt.address} />
+            <CopyButton value={usdt.address} />
+          </div>
+          <form onSubmit={submitClaim} className="space-y-2">
+            <input required className="input text-sm" placeholder="Paste your transaction hash after sending"
+              value={txHash} onChange={(e) => setTxHash(e.target.value)} />
+            <button disabled={submitting} className="btn-primary w-full text-sm">
+              {submitting ? 'Submitting…' : "I've sent it"}
+            </button>
+          </form>
+          <p className="text-center text-[11px] text-slate-400">
+            An admin verifies every USDT payment on-chain by hand before it's marked funded — this isn't automatic.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InviteThirdPartyModal({ escrowId, onClose }) {
+  const [label, setLabel] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const { data } = await api.post(`/escrows/${escrowId}/invite-third-party`, { label });
+      setResult(data);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not create the invite');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center bg-navy-950/40 p-6">
+      <div className="card w-full max-w-md p-6">
+        {result ? (
+          <>
+            <p className="font-display font-semibold text-navy-900">Invite ready</p>
+            <p className="mt-1 text-sm text-slate-500">Send the link and lock code separately, just like the main invite.</p>
+            <div className="mt-4 space-y-2">
+              <div className="flex gap-2">
+                <input readOnly className="input font-mono text-sm" value={result.inviteUrl} />
+                <CopyButton value={result.inviteUrl} />
+              </div>
+              <div className="flex justify-center pt-2">
+                <LockCodeBadge code={result.lockCode} />
+              </div>
+            </div>
+            <button onClick={onClose} className="btn-primary mt-6 w-full">Done</button>
+          </>
+        ) : (
+          <form onSubmit={submit} className="space-y-4">
+            <p className="font-display font-semibold text-navy-900">Invite a third party</p>
+            {error && <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-500">{error}</p>}
+            <div>
+              <label className="label">Label (optional)</label>
+              <input className="input" placeholder="e.g. Mediator, Inspector" value={label} onChange={(e) => setLabel(e.target.value)} />
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
+              <button disabled={loading} className="btn-accent flex-1">{loading ? 'Creating…' : 'Create invite'}</button>
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 }
 
 function BankDetailsCard() {
   const { user } = useAuth();
+  const [method, setMethod] = useState('mobile_money');
   const [banks, setBanks] = useState([]);
   const [form, setForm] = useState({ bankCode: '', accountNumber: '' });
   const [saved, setSaved] = useState(user?.hasBankDetails);
@@ -207,15 +382,15 @@ function BankDetailsCard() {
 
   useEffect(() => {
     if (saved) return;
-    api.get('/payments/banks').then(({ data }) => setBanks(data.banks)).catch(() => {});
-  }, [saved]);
+    api.get(`/payments/banks?method=${method}`).then(({ data }) => setBanks(data.banks)).catch(() => {});
+  }, [saved, method]);
 
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await api.post('/payments/bank-details', form);
+      await api.post('/payments/bank-details', { ...form, method });
       setSaved(true);
     } catch (err) {
       setError(err.response?.data?.message || 'Could not verify that account');
@@ -237,14 +412,26 @@ function BankDetailsCard() {
     <div className="card p-5">
       <p className="font-display text-sm font-semibold text-navy-900">Add your payout account</p>
       <p className="mt-1 text-xs text-slate-500">Needed before funds can be released to you.</p>
-      <form onSubmit={submit} className="mt-3 space-y-2">
+
+      <div className="mt-3 mb-2 flex gap-1 rounded-lg bg-slate-100 p-1 text-xs font-medium">
+        <button type="button" onClick={() => setMethod('mobile_money')}
+          className={`flex-1 rounded-md py-1.5 ${method === 'mobile_money' ? 'bg-white shadow-sm text-navy-900' : 'text-slate-500'}`}>
+          M-Pesa
+        </button>
+        <button type="button" onClick={() => setMethod('bank')}
+          className={`flex-1 rounded-md py-1.5 ${method === 'bank' ? 'bg-white shadow-sm text-navy-900' : 'text-slate-500'}`}>
+          Bank account
+        </button>
+      </div>
+
+      <form onSubmit={submit} className="space-y-2">
         {error && <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-500">{error}</p>}
         <select required className="input text-sm" value={form.bankCode}
           onChange={(e) => setForm({ ...form, bankCode: e.target.value })}>
-          <option value="">Select bank</option>
+          <option value="">{method === 'mobile_money' ? 'Select provider' : 'Select bank'}</option>
           {banks.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
         </select>
-        <input required className="input text-sm" placeholder="Account number"
+        <input required className="input text-sm" placeholder={method === 'mobile_money' ? 'M-Pesa phone number' : 'Account number'}
           value={form.accountNumber} onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} />
         <button disabled={loading} className="btn-primary w-full text-sm">{loading ? 'Verifying…' : 'Save account'}</button>
       </form>
