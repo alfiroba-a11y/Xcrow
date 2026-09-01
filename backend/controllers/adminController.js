@@ -150,8 +150,13 @@ exports.approvePayout = async (req, res) => {
     escrow.payout.status = 'processing';
     await escrow.save();
 
+    // Seller receives the amount minus the platform fee, not the full
+    // buyer-paid amount.
+    const feeAmount = Math.round(escrow.amount * (escrow.feePercent / 100));
+    const netAmount = escrow.amount - feeAmount;
+
     const transfer = await paystack.initiateTransfer({
-      amount: escrow.amount,
+      amount: netAmount,
       recipientCode: escrow.seller.bankDetails.recipientCode,
       reason: `Xcrow escrow payout: ${escrow.title}`,
     });
@@ -168,8 +173,34 @@ exports.approvePayout = async (req, res) => {
     escrow.payout.status = 'failed';
     await escrow.save();
     console.error('Payout error:', err.response?.data || err.message);
-    res.status(502).json({ message: 'Transfer failed. Check the Paystack balance and try again.' });
+    res.status(502).json({
+      // Surface Paystack's real reason (e.g. "Starter Business" Transfer
+      // restriction) instead of a generic message, so it's actionable.
+      message: err.response?.data?.message || 'Transfer failed. Check the Paystack balance and try again.',
+    });
   }
+};
+
+// For when Paystack's own account restrictions (e.g. Starter Business tier
+// blocking third-party Transfers) make automatic payout impossible. Records
+// that the admin paid the seller by some other means — never redirects a
+// refund or fabricates a Paystack transfer, since neither is real money
+// movement Paystack's API can actually do to a third party in that case.
+exports.markPayoutManual = async (req, res) => {
+  const escrow = await Escrow.findById(req.params.id);
+  if (!escrow) return res.status(404).json({ message: 'Escrow not found' });
+  if (escrow.status !== 'completed' || !['pending', 'failed'].includes(escrow.payout.status)) {
+    return res.status(400).json({ message: 'This escrow is not awaiting a payout to mark' });
+  }
+
+  escrow.payout.status = 'paid';
+  escrow.payout.paidAt = new Date();
+  escrow.payout.transferCode = 'MANUAL';
+  await escrow.save();
+  await addSystemMessage(escrow._id, 'An admin paid the seller manually outside Paystack and marked this escrow as settled.');
+  notifyAdmins(req);
+
+  res.json({ escrow });
 };
 
 // Admin has manually checked the transaction hash on a block explorer and
