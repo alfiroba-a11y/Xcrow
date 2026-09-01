@@ -12,6 +12,7 @@ router.post('/bank-details', bankCtrl.saveBankDetails);
 router.get('/usdt-address', ctrl.getUsdtAddress);
 router.post('/:id/initialize', ctrl.initializePayment);
 router.post('/:id/verify', ctrl.verifyPayment);
+router.post('/:id/charge-mpesa', ctrl.chargeMpesa);
 router.post('/:id/submit-crypto', ctrl.submitCryptoPayment);
 
 module.exports = router;
