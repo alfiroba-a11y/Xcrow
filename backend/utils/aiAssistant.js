@@ -1,17 +1,18 @@
 const axios = require('axios');
 
-const anthropic = axios.create({
-  baseURL: 'https://api.anthropic.com/v1',
+// Groq: genuinely free tier, no credit card required, and built on custom
+// hardware specifically for low-latency inference — a better fit for a live
+// chat than most paid APIs, not just a cheaper one. OpenAI-compatible API.
+const groq = axios.create({
+  baseURL: 'https://api.groq.com/openai/v1',
   headers: {
-    'x-api-key': process.env.ANTHROPIC_API_KEY,
-    'anthropic-version': '2023-06-01',
+    Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
     'content-type': 'application/json',
   },
   timeout: 15000,
 });
 
-// Fast + cheap model, since this needs to feel snappy inside a live chat.
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'llama-3.3-70b-versatile';
 
 // Deliberately the ONLY two things the AI can ever do. There is no
 // mark-funded / release / refund tool — that's not an oversight, it's the
@@ -19,15 +20,21 @@ const MODEL = 'claude-haiku-4-5-20251001';
 // no tool for.
 const TOOLS = [
   {
-    name: 'initiate_paystack_payment',
-    description:
-      "Starts a Paystack payment for this escrow's buyer and returns a checkout link. Only works if the requester is the buyer and the escrow is currently awaiting payment.",
-    input_schema: { type: 'object', properties: {} },
+    type: 'function',
+    function: {
+      name: 'initiate_paystack_payment',
+      description:
+        "Starts a Paystack payment for this escrow's buyer and returns a checkout link. Only works if the requester is the buyer and the escrow is currently awaiting payment.",
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
   },
   {
-    name: 'get_usdt_deposit_address',
-    description: 'Returns the USDT deposit address and network for this escrow, if USDT payments are enabled.',
-    input_schema: { type: 'object', properties: {} },
+    type: 'function',
+    function: {
+      name: 'get_usdt_deposit_address',
+      description: 'Returns the USDT deposit address and network for this escrow, if USDT payments are enabled.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
   },
 ];
 
@@ -75,51 +82,57 @@ async function runTool(name, { escrow, isBuyer }) {
 // link) the caller may want to do something extra with, separate from the
 // prose reply.
 async function getAIResponse({ escrow, question, requesterRole, isBuyer }) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GROQ_API_KEY) {
     return { text: "The AI assistant isn't set up for this platform yet — try Contact support instead.", extra: null };
   }
 
   const system = buildSystemPrompt(escrow, requesterRole);
-  const messages = [{ role: 'user', content: question.slice(0, 1000) }];
+  const messages = [
+    { role: 'system', content: system },
+    { role: 'user', content: question.slice(0, 1000) },
+  ];
 
-  const first = await anthropic.post('/messages', {
+  const first = await groq.post('/chat/completions', {
     model: MODEL,
     max_tokens: 400,
-    system,
     tools: TOOLS,
+    tool_choice: 'auto',
     messages,
   });
 
-  const toolUse = first.data.content.find((b) => b.type === 'tool_use');
-  if (!toolUse) {
-    const textBlock = first.data.content.find((b) => b.type === 'text');
-    return { text: textBlock?.text?.trim() || "I'm not sure how to help with that.", extra: null };
+  const choice = first.data.choices[0].message;
+  const toolCall = choice.tool_calls?.[0];
+
+  if (!toolCall) {
+    return { text: choice.content?.trim() || "I'm not sure how to help with that.", extra: null };
   }
 
-  const toolResult = await runTool(toolUse.name, { escrow, isBuyer });
+  const toolName = toolCall.function.name;
+  const toolResult = await runTool(toolName, { escrow, isBuyer });
   let extra = null;
-  if (toolResult.ok && toolUse.name === 'initiate_paystack_payment') {
+  if (toolResult.ok && toolName === 'initiate_paystack_payment') {
     extra = { type: 'paystack', authorizationUrl: toolResult.authorization_url };
-  } else if (toolResult.ok && toolUse.name === 'get_usdt_deposit_address') {
+  } else if (toolResult.ok && toolName === 'get_usdt_deposit_address') {
     extra = { type: 'usdt', address: toolResult.address, network: toolResult.network };
   }
 
-  messages.push({ role: 'assistant', content: first.data.content });
+  messages.push(choice);
   messages.push({
-    role: 'user',
-    content: [{ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(toolResult) }],
+    role: 'tool',
+    tool_call_id: toolCall.id,
+    content: JSON.stringify(toolResult),
   });
 
-  const second = await anthropic.post('/messages', {
+  const second = await groq.post('/chat/completions', {
     model: MODEL,
     max_tokens: 300,
-    system,
     tools: TOOLS,
+    tool_choice: 'auto',
     messages,
   });
 
-  const finalText = second.data.content.find((b) => b.type === 'text');
-  return { text: finalText?.text?.trim() || 'Done.', extra };
+  const finalText = second.data.choices[0].message.content;
+  return { text: finalText?.trim() || 'Done.', extra };
 }
 
 module.exports = { getAIResponse };
