@@ -48,10 +48,24 @@ async function initiateTransfer({ amount, recipientCode, reason }) {
   return data.data; // { transfer_code, status, ... }
 }
 
+// Direct M-Pesa STK push: no hosted checkout page, no card, no separate
+// Paystack account for the buyer — just their phone number.
+async function chargeMobileMoney({ email, amount, currency, phone, escrowId }) {
+  const { data } = await paystack.post('/charge', {
+    email,
+    amount,
+    currency,
+    mobile_money: { phone, provider: 'mpesa' },
+    metadata: { escrowId },
+  });
+  return data.data; // { reference, status, display_text, ... }
+}
+
 module.exports = {
   verifyTransaction,
   resolveAccountNumber,
   listBanks,
   createTransferRecipient,
   initiateTransfer,
+  chargeMobileMoney,
 };
