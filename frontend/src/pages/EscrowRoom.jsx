@@ -144,7 +144,7 @@ export default function EscrowRoom() {
                   : 'Waiting for the other side to join'}
               </p>
             </div>
-            <StatusPill status={escrow.status} />
+                        <StatusPill status={escrow.status} payoutStatus={escrow.payout?.status} />
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto p-4">
