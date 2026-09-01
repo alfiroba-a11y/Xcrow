@@ -129,3 +129,44 @@ exports.submitCryptoPayment = async (req, res) => {
 
   res.json({ escrow: escrow.toClientJSON() });
 };
+
+// Instant M-Pesa deposit — the buyer just gives their phone number and gets
+// an STK push directly, no Paystack popup or card entry. Confirmation
+// arrives asynchronously via the /api/webhooks/paystack handler, which is
+// the only thing that actually marks the escrow funded — this endpoint only
+// starts the prompt.
+exports.chargeMpesa = async (req, res) => {
+  const { phone } = req.body;
+  if (!phone || !/^\+?\d{9,15}$/.test(phone.replace(/\s/g, ''))) {
+    return res.status(400).json({ message: 'Enter a valid M-Pesa phone number, e.g. +254712345678' });
+  }
+
+  const escrow = await Escrow.findById(req.params.id).populate('buyer', 'name email');
+  if (!escrow) return res.status(404).json({ message: 'Escrow not found' });
+  if (String(escrow.buyer._id) !== String(req.user._id)) {
+    return res.status(403).json({ message: 'Only the buyer can fund this escrow' });
+  }
+  if (escrow.status !== 'awaiting_payment') {
+    return res.status(400).json({ message: 'This escrow is not awaiting payment' });
+  }
+  if (escrow.currency !== 'KES') {
+    return res.status(400).json({ message: 'M-Pesa is only available for KES escrows' });
+  }
+
+  try {
+    const result = await paystack.chargeMobileMoney({
+      email: escrow.buyer.email,
+      amount: escrow.amount,
+      currency: escrow.currency,
+      phone: phone.replace(/\s/g, ''),
+      escrowId: String(escrow._id),
+    });
+    res.json({
+      reference: result.reference,
+      displayText: result.display_text || 'Check your phone and enter your M-Pesa PIN to complete the payment.',
+    });
+  } catch (err) {
+    console.error('M-Pesa charge error:', err.response?.data || err.message);
+    res.status(502).json({ message: err.response?.data?.message || 'Could not start the M-Pesa prompt. Please try again.' });
+  }
+};
