@@ -1,0 +1,125 @@
+const axios = require('axios');
+
+const anthropic = axios.create({
+  baseURL: 'https://api.anthropic.com/v1',
+  headers: {
+    'x-api-key': process.env.ANTHROPIC_API_KEY,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  },
+  timeout: 15000,
+});
+
+// Fast + cheap model, since this needs to feel snappy inside a live chat.
+const MODEL = 'claude-haiku-4-5-20251001';
+
+// Deliberately the ONLY two things the AI can ever do. There is no
+// mark-funded / release / refund tool — that's not an oversight, it's the
+// entire safety design. It cannot be prompted into doing something it has
+// no tool for.
+const TOOLS = [
+  {
+    name: 'initiate_paystack_payment',
+    description:
+      "Starts a Paystack payment for this escrow's buyer and returns a checkout link. Only works if the requester is the buyer and the escrow is currently awaiting payment.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_usdt_deposit_address',
+    description: 'Returns the USDT deposit address and network for this escrow, if USDT payments are enabled.',
+    input_schema: { type: 'object', properties: {} },
+  },
+];
+
+function buildSystemPrompt(escrow, requesterRole) {
+  return `You are the Xcrow AI Assistant, embedded in the chat for one specific escrow trade on Xcrow, a Kenyan escrow platform.
+
+Facts about THIS escrow — trust only these, never invent details:
+- Title: ${escrow.title}
+- Amount: ${(escrow.amount / 100).toFixed(2)} ${escrow.currency}
+- Status: ${escrow.status}
+- You are speaking with: the ${requesterRole}
+
+How Xcrow actually works — be accurate about this, it matters:
+- Funds are held in escrow until the seller delivers and the buyer confirms receipt.
+- Even after the buyer confirms, a human admin must separately review and approve the payout before any money reaches the seller. This is never automatic, and you cannot change or skip it.
+- You cannot mark this escrow as funded, release funds, issue a refund, or approve any payout — you have no ability to do any of that, on purpose. If asked, say so plainly and point them to "Contact support" for anything needing a human decision.
+- You CAN start a Paystack payment or share the USDT deposit address, using your tools. Never invent a payment link, address, or amount yourself — always use the tools for that.
+
+Style: 2–4 short sentences, plain language, no markdown headers or bullet lists. If you don't know something about this specific trade, say so rather than guessing.`;
+}
+
+async function runTool(name, { escrow, isBuyer }) {
+  if (name === 'initiate_paystack_payment') {
+    if (!isBuyer) return { error: 'Only the buyer can start this payment.' };
+    if (escrow.status !== 'awaiting_payment') return { error: 'This escrow is not currently awaiting payment.' };
+    try {
+      // Lazy require avoids a load-order issue with paymentController.
+      const { initializePaystackForEscrow } = require('../controllers/paymentController');
+      const result = await initializePaystackForEscrow(escrow);
+      return { ok: true, authorization_url: result.authorizationUrl };
+    } catch (err) {
+      return { error: 'Could not start the payment right now — please try the Fund button instead.' };
+    }
+  }
+
+  if (name === 'get_usdt_deposit_address') {
+    if (!process.env.USDT_DEPOSIT_ADDRESS) return { error: 'USDT payments are not enabled.' };
+    return { ok: true, address: process.env.USDT_DEPOSIT_ADDRESS, network: process.env.USDT_NETWORK || 'ERC20' };
+  }
+
+  return { error: 'Unknown tool' };
+}
+
+// Returns { text, extra } — extra carries structured data (e.g. a payment
+// link) the caller may want to do something extra with, separate from the
+// prose reply.
+async function getAIResponse({ escrow, question, requesterRole, isBuyer }) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return { text: "The AI assistant isn't set up for this platform yet — try Contact support instead.", extra: null };
+  }
+
+  const system = buildSystemPrompt(escrow, requesterRole);
+  const messages = [{ role: 'user', content: question.slice(0, 1000) }];
+
+  const first = await anthropic.post('/messages', {
+    model: MODEL,
+    max_tokens: 400,
+    system,
+    tools: TOOLS,
+    messages,
+  });
+
+  const toolUse = first.data.content.find((b) => b.type === 'tool_use');
+  if (!toolUse) {
+    const textBlock = first.data.content.find((b) => b.type === 'text');
+    return { text: textBlock?.text?.trim() || "I'm not sure how to help with that.", extra: null };
+  }
+
+  const toolResult = await runTool(toolUse.name, { escrow, isBuyer });
+  let extra = null;
+  if (toolResult.ok && toolUse.name === 'initiate_paystack_payment') {
+    extra = { type: 'paystack', authorizationUrl: toolResult.authorization_url };
+  } else if (toolResult.ok && toolUse.name === 'get_usdt_deposit_address') {
+    extra = { type: 'usdt', address: toolResult.address, network: toolResult.network };
+  }
+
+  messages.push({ role: 'assistant', content: first.data.content });
+  messages.push({
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(toolResult) }],
+  });
+
+  const second = await anthropic.post('/messages', {
+    model: MODEL,
+    max_tokens: 300,
+    system,
+    tools: TOOLS,
+    messages,
+  });
+
+  const finalText = second.data.content.find((b) => b.type === 'text');
+  return { text: finalText?.text?.trim() || 'Done.', extra };
+}
+
+module.exports = { getAIResponse };
