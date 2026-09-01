@@ -7,7 +7,7 @@ import { api } from '../api/axios.js';
 
 export default function CreateEscrow() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ title: '', description: '', amount: '', role: 'buyer' });
+  const [form, setForm] = useState({ title: '', description: '', amount: '', role: 'buyer', mode: 'standard' });
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -71,6 +71,23 @@ export default function CreateEscrow() {
                 <input type="number" min="1" step="0.01" required className="input" placeholder="5000"
                   value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
               </div>
+              <div>
+                <label className="label">Escrow type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button"
+                    onClick={() => setForm({ ...form, mode: 'standard' })}
+                    className={`rounded-lg border px-4 py-2.5 text-left text-sm ${form.mode === 'standard' ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-100'}`}>
+                    <span className="font-medium text-navy-900">Standard</span>
+                    <p className="mt-0.5 text-xs text-slate-500">Just the two of you, plus support if needed.</p>
+                  </button>
+                  <button type="button"
+                    onClick={() => setForm({ ...form, mode: 'ai' })}
+                    className={`rounded-lg border px-4 py-2.5 text-left text-sm ${form.mode === 'ai' ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-100'}`}>
+                    <span className="font-medium text-navy-900">🤖 AI-Assisted</span>
+                    <p className="mt-0.5 text-xs text-slate-500">An AI in the chat can answer questions and start payments — it can never release or refund funds.</p>
+                  </button>
+                </div>
+              </div>
               <button className="btn-accent w-full" disabled={loading}>
                 {loading ? 'Creating…' : 'Create escrow'}
               </button>
@@ -95,8 +112,9 @@ export default function CreateEscrow() {
 
             <div className="mt-6">
               <label className="label text-left">Lock code</label>
-              <div className="flex justify-center">
+              <div className="flex items-center justify-center gap-3">
                 <LockCodeBadge code={result.lockCode} />
+                <CopyButton value={result.lockCode} label="Copy code" />
               </div>
               <p className="mt-2 text-xs text-slate-400">This is shown once. Write it down before you leave this page.</p>
             </div>
