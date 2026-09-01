@@ -39,6 +39,9 @@ const escrowSchema = new mongoose.Schema(
     // and start payments, but can never mark funded/release/refund — those
     // stay admin-only regardless of mode.
     mode: { type: String, enum: ['standard', 'ai'], default: 'standard' },
+    // Snapshotted at creation so changing the platform-wide fee later never
+    // changes what an existing escrow already promised its participants.
+    feePercent: { type: Number, default: () => Number(process.env.ESCROW_FEE_PERCENT || 2) },
 
     // Exactly one of these is set at creation (whichever role the creator
     // picked); the other fills in once someone joins via the invite link.
@@ -93,6 +96,12 @@ escrowSchema.methods.toClientJSON = function () {
       return rest;
     });
   }
+  // Fee is charged to the seller's side, not added on top of what the buyer
+  // pays — the buyer pays exactly `amount`, the seller receives `amount`
+  // minus the fee. Computed here rather than stored, so it always reflects
+  // the escrow's own snapshotted feePercent.
+  obj.feeAmount = Math.round(obj.amount * (obj.feePercent / 100));
+  obj.sellerReceives = obj.amount - obj.feeAmount;
   return obj;
 };
 
