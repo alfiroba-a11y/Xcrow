@@ -144,7 +144,7 @@ export default function EscrowRoom() {
                   : 'Waiting for the other side to join'}
               </p>
             </div>
-                        <StatusPill status={escrow.status} payoutStatus={escrow.payout?.status} />
+            <StatusPill status={escrow.status} payoutStatus={escrow.payout?.status} />
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -221,7 +221,7 @@ export default function EscrowRoom() {
               {isSeller && ['funded', 'in_progress'].includes(escrow.status) && (
                 <button onClick={() => handleAction('deliver')} disabled={busy} className="btn-primary w-full">Mark as delivered</button>
               )}
-                            {isBuyer && escrow.status === 'delivered' && (
+              {isBuyer && escrow.status === 'delivered' && (
                 <button onClick={() => handleAction('confirm')} disabled={busy} className="btn-accent w-full">Confirm receipt & release funds</button>
               )}
               {escrow.status === 'completed' && (escrow.payout?.status === 'pending' || escrow.payout?.status === 'processing') && (
@@ -267,11 +267,45 @@ function FundingPanel({ escrowId, escrow, onUpdated, setError, busy, onPaystack,
   const [usdt, setUsdt] = useState(null);
   const [txHash, setTxHash] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [mpesaStatus, setMpesaStatus] = useState(null); // null | 'sending' | 'waiting' | 'error'
+  const [mpesaMessage, setMpesaMessage] = useState('');
 
   useEffect(() => {
     if (fundTab !== 'usdt' || usdt) return;
     api.get('/payments/usdt-address').then(({ data }) => setUsdt(data)).catch(() => setUsdt(false));
   }, [fundTab, usdt]);
+
+  // While waiting for the STK push to be completed, poll the escrow itself —
+  // the webhook is what actually marks it funded, this just notices when
+  // that's happened so the UI can move on without a manual refresh.
+  useEffect(() => {
+    if (mpesaStatus !== 'waiting') return;
+    let cancelled = false;
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts += 1;
+      try {
+        const { data } = await api.get(`/escrows/${escrowId}`);
+        if (cancelled) return;
+        if (data.escrow.status !== 'awaiting_payment') {
+          onUpdated(data.escrow);
+          setMpesaStatus(null);
+          clearInterval(interval);
+        } else if (attempts > 40) { // ~2 minutes at 3s intervals
+          setMpesaStatus('error');
+          setMpesaMessage('Still waiting on confirmation — check your phone, or try again.');
+          clearInterval(interval);
+        }
+      } catch {
+        // transient errors are fine, just keep polling
+      }
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [mpesaStatus, escrowId, onUpdated]);
 
   const submitClaim = async (e) => {
     e.preventDefault();
@@ -287,6 +321,20 @@ function FundingPanel({ escrowId, escrow, onUpdated, setError, busy, onPaystack,
     }
   };
 
+  const startMpesa = async (e) => {
+    e.preventDefault();
+    setMpesaStatus('sending');
+    setError('');
+    try {
+      const { data } = await api.post(`/payments/${escrowId}/charge-mpesa`, { phone });
+      setMpesaMessage(data.displayText);
+      setMpesaStatus('waiting');
+    } catch (err) {
+      setMpesaStatus('error');
+      setMpesaMessage(err.response?.data?.message || 'Could not start the M-Pesa prompt');
+    }
+  };
+
   if (escrow.usdtClaim?.txHash && !escrow.usdtClaim.confirmedAt) {
     return (
       <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
@@ -298,9 +346,13 @@ function FundingPanel({ escrowId, escrow, onUpdated, setError, busy, onPaystack,
   return (
     <div>
       <div className="mb-2 flex gap-1 rounded-lg bg-slate-100 p-1 text-xs font-medium">
+        <button type="button" onClick={() => setFundTab('mpesa')}
+          className={`flex-1 rounded-md py-1.5 ${fundTab === 'mpesa' ? 'bg-white shadow-sm text-navy-900' : 'text-slate-500'}`}>
+          M-Pesa
+        </button>
         <button type="button" onClick={() => setFundTab('paystack')}
           className={`flex-1 rounded-md py-1.5 ${fundTab === 'paystack' ? 'bg-white shadow-sm text-navy-900' : 'text-slate-500'}`}>
-          Paystack
+          Card
         </button>
         <button type="button" onClick={() => setFundTab('usdt')}
           className={`flex-1 rounded-md py-1.5 ${fundTab === 'usdt' ? 'bg-white shadow-sm text-navy-900' : 'text-slate-500'}`}>
@@ -308,8 +360,26 @@ function FundingPanel({ escrowId, escrow, onUpdated, setError, busy, onPaystack,
         </button>
       </div>
 
-      {fundTab === 'paystack' ? (
-        <button onClick={onPaystack} disabled={busy} className="btn-accent w-full">Fund escrow with Paystack</button>
+      {fundTab === 'mpesa' ? (
+        mpesaStatus === 'waiting' ? (
+          <div className="space-y-2 rounded-lg bg-emerald-500/10 px-3 py-3 text-center">
+            <span className="mx-auto block h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+            <p className="text-sm text-emerald-700">{mpesaMessage}</p>
+            <p className="text-xs text-slate-500">This page updates itself once you confirm on your phone.</p>
+          </div>
+        ) : (
+          <form onSubmit={startMpesa} className="space-y-2">
+            {mpesaStatus === 'error' && <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-500">{mpesaMessage}</p>}
+            <input required className="input text-sm" placeholder="+254712345678"
+              value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <button disabled={mpesaStatus === 'sending'} className="btn-accent w-full text-sm">
+              {mpesaStatus === 'sending' ? 'Sending prompt…' : 'Pay with M-Pesa'}
+            </button>
+            <p className="text-center text-[11px] text-slate-400">You'll get a prompt on your phone — enter your PIN to complete it.</p>
+          </form>
+        )
+      ) : fundTab === 'paystack' ? (
+        <button onClick={onPaystack} disabled={busy} className="btn-accent w-full">Pay by card</button>
       ) : usdt === false ? (
         <p className="text-xs text-slate-400">USDT payments aren't set up for this escrow.</p>
       ) : !usdt ? (
