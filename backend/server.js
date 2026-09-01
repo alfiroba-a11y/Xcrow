@@ -17,6 +17,7 @@ const paymentRoutes = require('./routes/paymentRoutes');
 const supportRoutes = require('./routes/supportRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const setupRoutes = require('./routes/setupRoutes');
+const webhookRoutes = require('./routes/webhookRoutes');
 
 connectDB();
 
@@ -37,7 +38,10 @@ registerSocketHandlers(io);
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
-app.use(express.json({ limit: '1mb' }));
+// `verify` stashes the raw request bytes on req.rawBody — needed to check
+// Paystack's webhook signature, since a re-serialized JSON.stringify of the
+// parsed body isn't guaranteed to match the original bytes they signed.
+app.use(express.json({ limit: '1mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(morgan('dev'));
 
 // Generous global limit, tighter one on auth to blunt credential-stuffing / brute force.
@@ -51,6 +55,7 @@ app.use('/api/escrows', escrowRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/setup', setupRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // The admin API lives behind an unguessable path segment (set via env,
 // must match ADMIN_PANEL_SECRET / the frontend's VITE_ADMIN_PATH) on top of
