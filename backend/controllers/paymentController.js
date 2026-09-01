@@ -3,6 +3,29 @@ const { addSystemMessage } = require('./escrowController');
 const paystack = require('../utils/paystack');
 const axios = require('axios');
 
+// Shared by the HTTP route below and the AI assistant — one place that
+// actually talks to Paystack, so both paths use identical, server-trusted
+// amount/email logic.
+async function initializePaystackForEscrow(escrow) {
+  const response = await axios.post(
+    'https://api.paystack.co/transaction/initialize',
+    {
+      email: escrow.buyer.email,
+      amount: escrow.amount, // already stored in the smallest currency unit
+      currency: escrow.currency,
+      metadata: { escrowId: String(escrow._id) },
+      callback_url: `${process.env.CLIENT_URL}/escrow/${escrow._id}`,
+    },
+    { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
+  );
+  return {
+    accessCode: response.data.data.access_code,
+    reference: response.data.data.reference,
+    authorizationUrl: response.data.data.authorization_url,
+  };
+}
+exports.initializePaystackForEscrow = initializePaystackForEscrow;
+
 // The amount is always read from the escrow record on the server — never
 // trusted from the client — so nobody can pay less than what's owed.
 exports.initializePayment = async (req, res) => {
@@ -16,23 +39,8 @@ exports.initializePayment = async (req, res) => {
   }
 
   try {
-    const response = await axios.post(
-      'https://api.paystack.co/transaction/initialize',
-      {
-        email: escrow.buyer.email,
-        amount: escrow.amount, // already stored in kobo
-        currency: escrow.currency,
-        metadata: { escrowId: String(escrow._id) },
-        callback_url: `${process.env.CLIENT_URL}/escrow/${escrow._id}`,
-      },
-      { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
-    );
-
-    res.json({
-      accessCode: response.data.data.access_code,
-      reference: response.data.data.reference,
-      authorizationUrl: response.data.data.authorization_url,
-    });
+    const result = await initializePaystackForEscrow(escrow);
+    res.json(result);
   } catch (err) {
     console.error('Paystack init error:', err.response?.data || err.message);
     res.status(502).json({ message: 'Could not start the payment. Please try again.' });
