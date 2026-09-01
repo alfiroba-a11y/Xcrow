@@ -221,8 +221,17 @@ export default function EscrowRoom() {
               {isSeller && ['funded', 'in_progress'].includes(escrow.status) && (
                 <button onClick={() => handleAction('deliver')} disabled={busy} className="btn-primary w-full">Mark as delivered</button>
               )}
-              {isBuyer && escrow.status === 'delivered' && (
+                            {isBuyer && escrow.status === 'delivered' && (
                 <button onClick={() => handleAction('confirm')} disabled={busy} className="btn-accent w-full">Confirm receipt & release funds</button>
+              )}
+              {escrow.status === 'completed' && (escrow.payout?.status === 'pending' || escrow.payout?.status === 'processing') && (
+                <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-700">
+                  <span className="h-2 w-2 flex-none animate-pulse rounded-full bg-emerald-500" />
+                  Your payout is being processed.
+                </div>
+              )}
+              {escrow.status === 'completed' && escrow.payout?.status === 'paid' && (
+                <p className="rounded-lg bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-700">✅ Payout sent.</p>
               )}
               {isMainParty && ['awaiting_seller', 'awaiting_buyer', 'awaiting_payment'].includes(escrow.status) && (
                 <button onClick={() => handleAction('cancel')} disabled={busy} className="btn-ghost w-full text-rose-500">Cancel escrow</button>
