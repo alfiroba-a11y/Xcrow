@@ -35,6 +35,10 @@ const escrowSchema = new mongoose.Schema(
     description: { type: String, trim: true, maxlength: 2000 },
     amount: { type: Number, required: true, min: 100 }, // in the smallest currency unit (cents for KES)
     currency: { type: String, default: 'KES' },
+    // 'ai' escrows have an AI assistant in the chat that can answer questions
+    // and start payments, but can never mark funded/release/refund — those
+    // stay admin-only regardless of mode.
+    mode: { type: String, enum: ['standard', 'ai'], default: 'standard' },
 
     // Exactly one of these is set at creation (whichever role the creator
     // picked); the other fills in once someone joins via the invite link.
