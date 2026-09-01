@@ -34,7 +34,7 @@ async function addSystemMessage(escrowId, text) {
 // Either the buyer or the seller can start an escrow and invite the other
 // side — pass role: 'buyer' or 'seller' to say which one you are.
 exports.createEscrow = async (req, res) => {
-  const { title, description, amount, currency, role } = req.body;
+  const { title, description, amount, currency, role, mode } = req.body;
 
   if (!title || !amount) {
     return res.status(400).json({ message: 'Title and amount are required' });
@@ -44,12 +44,14 @@ exports.createEscrow = async (req, res) => {
     return res.status(400).json({ message: 'Enter a valid amount' });
   }
   const creatorRole = role === 'seller' ? 'seller' : 'buyer';
+  const escrowMode = mode === 'ai' ? 'ai' : 'standard';
 
   const escrow = await Escrow.create({
     title: title.trim(),
     description: (description || '').trim(),
     amount: Math.round(numericAmount * 100), // store in the smallest currency unit
     currency: currency || 'KES',
+    mode: escrowMode,
     buyer: creatorRole === 'buyer' ? req.user._id : null,
     seller: creatorRole === 'seller' ? req.user._id : null,
     status: creatorRole === 'buyer' ? 'awaiting_seller' : 'awaiting_buyer',
@@ -61,6 +63,12 @@ exports.createEscrow = async (req, res) => {
     escrow._id,
     `${req.user.name} created this escrow as the ${creatorRole}. Waiting for the ${creatorRole === 'buyer' ? 'seller' : 'buyer'} to join.`
   );
+  if (escrowMode === 'ai') {
+    await addSystemMessage(
+      escrow._id,
+      'AI Assistant enabled for this escrow. Type "/ai" followed by a question any time — it can explain the process and start payments, but every fund release still requires a human admin.'
+    );
+  }
 
   const inviteUrl = `${process.env.CLIENT_URL}/join/${escrow.inviteToken}`;
   res.status(201).json({
