@@ -134,7 +134,10 @@ export default function EscrowRoom() {
         <div className="card flex h-[70vh] flex-col">
           <div className="flex items-center justify-between border-b border-slate-100 p-4">
             <div>
-              <p className="font-display font-semibold text-navy-900">{escrow.title}</p>
+              <p className="font-display font-semibold text-navy-900">
+                {escrow.title}
+                {escrow.mode === 'ai' && <span className="ml-2 badge bg-emerald-500/10 text-emerald-600">🤖 AI-Assisted</span>}
+              </p>
               <p className="text-xs text-slate-500">
                 {others.length
                   ? others.map((o) => `${o.name} (${o.tag})`).join(' · ')
@@ -145,33 +148,51 @@ export default function EscrowRoom() {
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            {messages.map((m) => (
-              <div key={m._id} className={m.isSystem ? 'text-center' : (m.sender?._id || m.sender) === user.id ? 'flex justify-end' : 'flex justify-start'}>
-                {m.isSystem ? (
-                  <span className="inline-block rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500">{m.text}</span>
-                ) : (
-                  <div className={`max-w-xs rounded-2xl px-4 py-2 text-sm ${
-                    (m.sender?._id || m.sender) === user.id ? 'bg-navy-700 text-white' : 'bg-slate-100 text-navy-900'
-                  }`}>
-                    {!((m.sender?._id || m.sender) === user.id) && m.sender?.name && (
-                      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-60">{m.sender.name}</p>
-                    )}
-                    {m.text}
-                  </div>
-                )}
-              </div>
-            ))}
+            {messages.map((m) => {
+              const isAI = !m.sender && m.senderLabel;
+              const mine = (m.sender?._id || m.sender) === user.id;
+              return (
+                <div key={m._id} className={m.isSystem ? 'text-center' : mine ? 'flex justify-end' : 'flex justify-start'}>
+                  {m.isSystem ? (
+                    <span className="inline-block rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500">{m.text}</span>
+                  ) : isAI ? (
+                    <div className="max-w-xs rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm text-navy-900">
+                      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">🤖 {m.senderLabel}</p>
+                      {m.text}
+                    </div>
+                  ) : (
+                    <div className={`max-w-xs rounded-2xl px-4 py-2 text-sm ${mine ? 'bg-navy-700 text-white' : 'bg-slate-100 text-navy-900'}`}>
+                      {!mine && m.sender?.name && (
+                        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-60">{m.sender.name}</p>
+                      )}
+                      {m.text}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             <div ref={bottomRef} />
           </div>
 
           <form onSubmit={sendMessage} className="flex gap-2 border-t border-slate-100 p-3">
             <input
               className="input"
-              placeholder={escrow.buyer && escrow.seller ? 'Type a message…' : 'Chat unlocks once both sides have joined'}
+              placeholder={
+                !(escrow.buyer && escrow.seller)
+                  ? 'Chat unlocks once both sides have joined'
+                  : escrow.mode === 'ai'
+                  ? 'Type a message, or "/ai" + a question…'
+                  : 'Type a message…'
+              }
               disabled={!(escrow.buyer && escrow.seller)}
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
+            {escrow.mode === 'ai' && escrow.buyer && escrow.seller && (
+              <button type="button" onClick={() => setText('/ai ')} className="btn-ghost whitespace-nowrap" title="Ask the AI assistant">
+                🤖 Ask AI
+              </button>
+            )}
             <button className="btn-accent" disabled={!(escrow.buyer && escrow.seller)}>Send</button>
           </form>
         </div>
@@ -346,8 +367,9 @@ function InviteThirdPartyModal({ escrowId, onClose }) {
                 <input readOnly className="input font-mono text-sm" value={result.inviteUrl} />
                 <CopyButton value={result.inviteUrl} />
               </div>
-              <div className="flex justify-center pt-2">
+              <div className="flex items-center justify-center gap-3 pt-2">
                 <LockCodeBadge code={result.lockCode} />
+                <CopyButton value={result.lockCode} label="Copy code" />
               </div>
             </div>
             <button onClick={onClose} className="btn-primary mt-6 w-full">Done</button>
