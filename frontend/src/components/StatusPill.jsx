@@ -6,6 +6,7 @@ const STYLES = {
   in_progress: 'bg-navy-700/10 text-navy-700',
   delivered: 'bg-emerald-500/10 text-emerald-600',
   completed: 'bg-emerald-500/15 text-emerald-600',
+  processing: 'bg-emerald-500/15 text-emerald-600',
   disputed: 'bg-amber-500/15 text-amber-500',
   cancelled: 'bg-slate-100 text-slate-500',
   refunded: 'bg-rose-500/10 text-rose-500',
@@ -24,6 +25,19 @@ const LABELS = {
   refunded: 'Refunded',
 };
 
-export default function StatusPill({ status }) {
-  return <span className={`badge ${STYLES[status] || 'bg-slate-100 text-slate-600'}`}>{LABELS[status] || status}</span>;
+// payoutStatus lets the "completed" state read as "Payout processing" /
+// "Payout sent" instead of a flat "Completed" once the buyer has confirmed —
+// makes the flow feel continuous instead of stalling on one static label.
+export default function StatusPill({ status, payoutStatus }) {
+  let label = LABELS[status] || status;
+  let style = STYLES[status] || 'bg-slate-100 text-slate-600';
+
+  if (status === 'completed' && (payoutStatus === 'pending' || payoutStatus === 'processing')) {
+    label = 'Payout processing';
+    style = STYLES.processing;
+  } else if (status === 'completed' && payoutStatus === 'paid') {
+    label = 'Payout sent';
+  }
+
+  return <span className={`badge ${style}`}>{label}</span>;
 }
